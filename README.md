@@ -17,7 +17,7 @@ A mid-sized SaaS company receives **10,000+ support tickets per week**. Today:
 
 **Target outcome:** cut average time-to-first-response by 40%, reduce misrouting below 5%, and surface critical tickets within 60 seconds of arrival.
 
-This project is the routing layer that makes that possible.
+This project is the routing layer that makes that possible
 
 ---
 

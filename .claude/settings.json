@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -m pip install --quiet pydantic tenacity pytest)",
+      "Bash(.venv/Scripts/python.exe -m pip install --quiet -e . --no-deps)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -v)",
+      "Bash(python -c \"import os; print\\('ANTHROPIC_API_KEY set:', bool\\(os.environ.get\\('ANTHROPIC_API_KEY'\\)\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pip install --quiet pandas pyarrow datasets typer rich tqdm)",
+      "Bash(.venv/Scripts/python.exe scripts/build_dataset.py --limit 50 --skip-labeling --out data/processed/loader_smoke.parquet)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe -m pip install --quiet python-dotenv anthropic)",
+      "Bash(.venv/Scripts/python.exe -m pip install --quiet groq)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -q)",
+      "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; import os; load_dotenv\\(\\); k = os.environ.get\\('GROQ_API_KEY', ''\\); print\\('GROQ_API_KEY set:', bool\\(k\\), '| starts with gsk_:', k.startswith\\('gsk_'\\), '| length:', len\\(k\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; import os; load_dotenv\\(\\); k = os.environ.get\\('GROQ_API_KEY', ''\\); print\\('GROQ_API_KEY loaded from .env:', bool\\(k\\), '| length:', len\\(k\\)\\)\")",
+      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe -m pip install --quiet scikit-learn joblib)",
+      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe scripts/train_baseline.py)"
+    ]
+  }
+}

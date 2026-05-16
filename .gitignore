@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+env/
+.python-version
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data & models (large, regenerable)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+*.parquet
+*.csv
+*.jsonl
+artifacts/
+models_cache/
+*.pt
+*.bin
+*.safetensors
+
+# LLM response cache
+.cache/
+*.diskcache/
+
+# Secrets & env
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# MLflow / Evidently
+mlruns/
+mlartifacts/
+evidently_workspace/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Test & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Streamlit
+.streamlit/secrets.toml

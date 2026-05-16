@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe scripts/build_dataset.py --limit 20 --out data/processed/smoke.parquet)"
+    ]
+  }
+}

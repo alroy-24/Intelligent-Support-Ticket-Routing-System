@@ -128,12 +128,68 @@ LLM responses are cached by `sha256(ticket_text)`. Identical tickets (very commo
 
 ## 6. Results
 
-> _To be filled in once models are trained. Will include:_
-> - Macro-F1 per category, baseline vs. transformer
-> - Ordinal urgency MAE and confusion matrix
-> - Business-weighted cost reduction vs. random routing
-> - P50 / P95 end-to-end latency
-> - Per-1000-tickets API cost
+### Baseline category classifier (TF-IDF + LogReg on Bitext)
+
+| Metric | Value |
+|---|---|
+| Macro F1 | **0.998** |
+| Weighted F1 | 0.998 |
+| Training rows | 21,497 (80% of 26,872) |
+| Test rows | 5,375 |
+| Train time | ~5 seconds |
+
+Per-class F1: `billing 0.998`, `account 0.998`, `other 0.999`.
+
+### ⚠ Why this number is misleading — and why that's the most interesting result
+
+A 99.8% macro-F1 on a 3-class problem looks like a finished system. It isn't. Two things are happening:
+
+**1. Bitext is templated, so the classifier memorises templates, not concepts.**
+Every Bitext intent uses a small set of generated phrasings ("I want help to...", "how can I..."). TF-IDF picks up on the templates trivially. The model isn't learning what "billing" *means* — it's learning what Bitext's billing template *looks like*.
+
+**2. Bitext only honestly covers 3 of our 6 production categories.**
+After auditing the intent-to-category mapping (see [intent_mapping.py](src/ticketrouting/data/intent_mapping.py)), the honest picture is:
+
+| Category | Bitext examples | Notes |
+|---|---:|---|
+| BILLING | 11,927 | strong |
+| ACCOUNT | 6,985 | strong |
+| OTHER | 7,960 | strong (incl. shipping, feedback, contact-support) |
+| TECHNICAL | 0 | dataset has no engineering-issue intents |
+| BUG | 0 | "complaint"/"review" are feedback, not defects |
+| FEATURE_REQUEST | 0 | dataset has no feature-suggestion intents |
+
+The previous version of this project forced `complaint → BUG` and `change_shipping_address → TECHNICAL` to make the headline "6-class classifier" claim. That was wrong, and it inflated the per-class F1 by giving the classifier perfectly-templated phantom data. The current mapping reflects what Bitext actually contains.
+
+**3. Out-of-distribution probe: the model collapses on real-sounding text.**
+
+The held-out test set is in-distribution Bitext. To get a meaningful signal on whether the model *generalises*, I scored five hand-written tickets that look like real customer messages:
+
+| Ticket | Predicted | Confidence | OK? |
+|---|---|---:|---|
+| "My credit card was charged twice this month" | billing | 0.49 | ✓ (low confidence on an easy billing ticket) |
+| "I can't log into my account, password reset isn't working" | account | 0.99 | ✓ |
+| "How do I update my shipping address?" | other | 0.99 | ✓ |
+| "The app crashes when I try to open the dashboard" | account | 0.48 | ✗ — no BUG class exists in training |
+| "Could you add dark mode to the settings page?" | account | 0.47 | ✗ — no FEATURE_REQUEST class exists in training |
+
+The confidence drop from ~0.99 (in-distribution) to ~0.48 (out-of-distribution) is the model telling us it's unsure — and we should listen to it. Production routing decisions below ~0.6 confidence should escalate to human triage. This will become the threshold that drives the active-learning loop.
+
+### Takeaway for the rest of the project
+
+The baseline isn't "done at 99.8%." It's a working tool that:
+- Sets a real floor for the transformer to beat **on Bitext** (any honest comparison must be on the same data).
+- Surfaces low-confidence predictions to drive human relabelling — exactly the active-learning loop the system needs.
+- Tells us, unambiguously, that **we need the Twitter dataset** to cover BUG / TECHNICAL / FEATURE_REQUEST. No amount of better modelling fixes a coverage gap in the training data.
+
+### Still to fill in
+
+- DistilBERT vs. baseline on Bitext (same split)
+- Both models on the Twitter dataset (real-world OOD comparison)
+- Ordinal urgency MAE and confusion matrix
+- Business-weighted cost reduction vs. random routing
+- P50 / P95 end-to-end latency
+- Per-1000-tickets API cost
 
 ---
 
@@ -185,15 +241,16 @@ ticketrouting/
 ## 10. Roadmap
 
 - [x] Project framing & README
-- [ ] Repo scaffold + dependencies
-- [ ] Data ingestion for Bitext + Twitter
-- [ ] LLM labeling pipeline + validation sample
-- [ ] Baseline TF-IDF + LogReg category classifier
-- [ ] DistilBERT category classifier
+- [x] Repo scaffold + dependencies
+- [x] Bitext loader + honest intent→category mapping
+- [x] LLM labeling pipeline (Groq / Anthropic via shared `LLMClient` protocol, sha256-cached)
+- [x] Baseline TF-IDF + LogReg category classifier *(0.998 macro-F1 on Bitext — see Results for caveats)*
+- [ ] Twitter dataset ingestion + LLM-based category labeling (fills BUG / TECHNICAL / FEATURE_REQUEST gap)
+- [ ] DistilBERT category classifier (compare against baseline on same split)
 - [ ] Ordinal urgency model
 - [ ] LLM summarizer + entity extractor
 - [ ] FastAPI orchestration service
 - [ ] Confusion-cost matrix & business-weighted eval
 - [ ] Drift monitoring job
-- [ ] Active learning loop
+- [ ] Active learning loop (driven by confidence threshold from baseline)
 - [ ] Streamlit demo on HF Spaces

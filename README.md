@@ -182,6 +182,21 @@ The baseline isn't "done at 99.8%." It's a working tool that:
 - Surfaces low-confidence predictions to drive human relabelling — exactly the active-learning loop the system needs.
 - Tells us, unambiguously, that **we need the Twitter dataset** to cover BUG / TECHNICAL / FEATURE_REQUEST. No amount of better modelling fixes a coverage gap in the training data.
 
+### Twitter ingestion validates the coverage gap
+
+The Twitter pipeline (`scripts/build_twitter_dataset.py`) downloads the Customer Support on Twitter dataset, filters to inbound customer-originated tweets, anonymises mentions/URLs, and labels categories via a Groq-served LLM. A 100-row smoke run gives:
+
+| Category | n  | What this confirms |
+|---|---:|---|
+| OTHER | 66 | Twitter is noisy — lots of generic complaints and chatter. Expected. |
+| BILLING | 13 | Bitext also covers this; cross-source validation. |
+| BUG | 9 | **Net-new** — Bitext has zero. Real examples: "fix the accidental FaceTime call notification", "mark as read doesn't work". |
+| TECHNICAL | 5 | **Net-new**. Examples: "CoD WW2 servers are a mess", "my internet has been down for an hour". |
+| ACCOUNT | 4 | Cross-source validation. |
+| FEATURE_REQUEST | 3 | **Net-new**. Examples: "no parental controls for explicit lyrics", "combine baggage in one booking". |
+
+17% of the sample lands in the three categories Bitext genuinely can't reach. The full ~20k run is the next thing to kick off — the pipeline is sha256-cached so partial runs resume for free.
+
 ### Still to fill in
 
 - DistilBERT vs. baseline on Bitext (same split)
@@ -245,7 +260,8 @@ ticketrouting/
 - [x] Bitext loader + honest intent→category mapping
 - [x] LLM labeling pipeline (Groq / Anthropic via shared `LLMClient` protocol, sha256-cached)
 - [x] Baseline TF-IDF + LogReg category classifier *(0.998 macro-F1 on Bitext — see Results for caveats)*
-- [ ] Twitter dataset ingestion + LLM-based category labeling (fills BUG / TECHNICAL / FEATURE_REQUEST gap)
+- [x] Twitter dataset ingestion + LLM-based category labeling *(pipeline + 100-row smoke test; ~20k full run pending)*
+- [ ] Full 20k Twitter labeling run + merge with Bitext for combined training set
 - [ ] DistilBERT category classifier (compare against baseline on same split)
 - [ ] Ordinal urgency model
 - [ ] LLM summarizer + entity extractor

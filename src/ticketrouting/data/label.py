@@ -1,18 +1,9 @@
 """LLM-based synthetic labeling for ticket urgency AND category.
 
-Both labelers share the same skeleton: a temperature-0 JSON-mode LLM call,
-sha256-keyed disk cache (so reruns are free), tenacity-backed retries, and a
-rubric that bakes in the failure modes we've observed. The differences live in
-the rubric, the JSON keys, and the typed output dataclass.
-
-Design choices:
-
-- **Determinism:** temperature=0 + cache key includes model + rubric version,
-  so a rubric tweak invalidates only the affected labels (not the entire cache).
-- **Auditability:** every labeled row carries the model id and the rubric
-  version, so when we re-prompt later we can tell which labels are stale.
-- **Provider-agnostic:** swap Anthropic for Groq with no labeler changes; the
-  labeler only talks to the `LLMClient` protocol.
+Both labelers sit on top of `ticketrouting.llm.CachedJsonLabeler`, which gives
+them temperature=0 JSON-mode calls with sha256-keyed disk caching and tenacity
+retries. The only per-labeler code here is the rubric, the cache namespace, and
+the parser that maps the JSON payload to a typed dataclass.
 
 Why two rubrics:
 
@@ -25,15 +16,20 @@ Why two rubrics:
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 
-from tenacity import retry, stop_after_attempt, wait_exponential
-
+# Re-exported for back-compat with callers (scripts/build_dataset.py imports
+# make_client from here).
+from ticketrouting.llm import (  # noqa: F401
+    AnthropicClient,
+    CachedJsonLabeler,
+    GroqClient,
+    LLMClient,
+    make_client,
+    strip_code_fences,
+)
 from ticketrouting.schemas import Category, Urgency
 
 RUBRIC_VERSION = "v1"
@@ -100,141 +96,6 @@ Output STRICT JSON only, no prose:
 
 
 # ----------------------------------------------------------------------------
-# Client protocol + implementations
-# ----------------------------------------------------------------------------
-
-
-class LLMClient(Protocol):
-    """Minimal protocol so tests can swap in a fake and we can swap providers."""
-
-    model: str
-
-    def complete(self, system: str, user: str) -> str: ...
-
-
-class AnthropicClient:
-    """Wraps the Anthropic SDK. Lazy-imports so tests don't need the dep."""
-
-    DEFAULT_MODEL = "claude-haiku-4-5-20251001"
-
-    def __init__(self, api_key: str | None = None, model: str | None = None):
-        from anthropic import Anthropic
-
-        self.model = model or self.DEFAULT_MODEL
-        self._client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
-
-    def complete(self, system: str, user: str) -> str:
-        msg = self._client.messages.create(
-            model=self.model,
-            max_tokens=200,
-            temperature=0,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        return msg.content[0].text
-
-
-class GroqClient:
-    """Wraps the Groq SDK (OpenAI-compatible). Free tier, fast Llama inference."""
-
-    DEFAULT_MODEL = "llama-3.1-8b-instant"
-
-    def __init__(self, api_key: str | None = None, model: str | None = None):
-        from groq import Groq
-
-        self.model = model or self.DEFAULT_MODEL
-        self._client = Groq(api_key=api_key or os.environ.get("GROQ_API_KEY"))
-
-    def complete(self, system: str, user: str) -> str:
-        resp = self._client.chat.completions.create(
-            model=self.model,
-            max_tokens=200,
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
-        return resp.choices[0].message.content or ""
-
-
-def make_client(provider: str = "auto", model: str | None = None) -> LLMClient:
-    """Build an LLM client. `provider` is one of: auto, groq, anthropic.
-
-    `auto` picks based on which API key is set (Groq preferred since it's free).
-    """
-    if provider == "auto":
-        if os.environ.get("GROQ_API_KEY"):
-            provider = "groq"
-        elif os.environ.get("ANTHROPIC_API_KEY"):
-            provider = "anthropic"
-        else:
-            raise RuntimeError(
-                "No LLM API key found. Set GROQ_API_KEY or ANTHROPIC_API_KEY in your .env."
-            )
-
-    if provider == "groq":
-        return GroqClient(model=model)
-    if provider == "anthropic":
-        return AnthropicClient(model=model)
-    raise ValueError(f"Unknown provider: {provider!r}")
-
-
-# ----------------------------------------------------------------------------
-# Shared cached-LLM-call machinery
-# ----------------------------------------------------------------------------
-
-
-def _strip_code_fences(text: str) -> str:
-    """Models sometimes wrap JSON in ```json``` despite instructions — strip them."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
-    return text.strip()
-
-
-class _CachedJsonLabeler:
-    """Shared base: cache key by (model, rubric_version, text); retry; JSON parse.
-
-    Subclasses set `rubric` (system prompt) and `rubric_version`, then implement
-    `_parse_payload(data)` which receives the already-decoded JSON dict and
-    returns a typed label.
-    """
-
-    rubric: str = ""
-    rubric_version: str = ""
-
-    def __init__(
-        self,
-        client: LLMClient | None = None,
-        cache_dir: Path | str | None = None,
-    ):
-        self._client = client or make_client()
-        self._cache_dir = Path(cache_dir) if cache_dir else Path(".cache/llm")
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
-
-    @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=1, min=2, max=30))
-    def _call_llm(self, ticket_text: str) -> str:
-        return self._client.complete(
-            system=self.rubric,
-            user=f"Ticket:\n{ticket_text.strip()}",
-        )
-
-    def _cache_key(self, ticket_text: str) -> str:
-        h = hashlib.sha256()
-        h.update(self._client.model.encode())
-        h.update(self.rubric_version.encode())
-        h.update(ticket_text.encode())
-        return h.hexdigest()
-
-    def _cache_path(self, ticket_text: str) -> Path:
-        return self._cache_dir / f"{self._cache_key(ticket_text)}.json"
-
-
-# ----------------------------------------------------------------------------
 # Urgency labeler
 # ----------------------------------------------------------------------------
 
@@ -247,7 +108,7 @@ class UrgencyLabel:
     rubric_version: str
 
 
-class UrgencyLabeler(_CachedJsonLabeler):
+class UrgencyLabeler(CachedJsonLabeler):
     """Label tickets for urgency with disk-cached, retried LLM calls."""
 
     rubric = URGENCY_RUBRIC
@@ -264,7 +125,7 @@ class UrgencyLabeler(_CachedJsonLabeler):
         return label
 
     def _parse(self, raw: str) -> UrgencyLabel:
-        data = json.loads(_strip_code_fences(raw))
+        data = json.loads(strip_code_fences(raw))
         return UrgencyLabel(
             urgency=Urgency(data["urgency"].lower()),
             reasoning=str(data.get("reasoning", "")).strip(),
@@ -311,7 +172,7 @@ class CategoryLabel:
     rubric_version: str
 
 
-class CategoryLabeler(_CachedJsonLabeler):
+class CategoryLabeler(CachedJsonLabeler):
     """Label tickets for category with disk-cached, retried LLM calls.
 
     Built specifically for Twitter ingestion: Bitext's intent column gives us
@@ -333,7 +194,7 @@ class CategoryLabeler(_CachedJsonLabeler):
         return label
 
     def _parse(self, raw: str) -> CategoryLabel:
-        data = json.loads(_strip_code_fences(raw))
+        data = json.loads(strip_code_fences(raw))
         return CategoryLabel(
             category=Category(data["category"].lower()),
             reasoning=str(data.get("reasoning", "")).strip(),

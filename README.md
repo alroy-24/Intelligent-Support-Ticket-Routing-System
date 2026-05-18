@@ -264,7 +264,7 @@ ticketrouting/
 - [ ] Full 20k Twitter labeling run + merge with Bitext for combined training set
 - [ ] DistilBERT category classifier (compare against baseline on same split)
 - [x] Ordinal urgency model *(TF-IDF + Frank & Hall K-1-threshold LogReg; MAE + off-by-≥2 reporting; awaiting real urgency-labeled training set)*
-- [ ] LLM summarizer + entity extractor
+- [x] LLM summarizer + entity extractor *(JSON-mode call returning summary + pydantic Entities; sha256-cached; smoke-tested on real ticket)*
 - [ ] FastAPI orchestration service
 - [ ] Confusion-cost matrix & business-weighted eval
 - [ ] Drift monitoring job

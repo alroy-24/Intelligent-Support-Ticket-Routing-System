@@ -286,6 +286,6 @@ ticketrouting/
 - [x] FastAPI orchestration service *(`/route` runs all 3 models concurrently with a summary deadline + graceful degradation; `/health` reports per-model load status)*
 - [x] Streamlit demo *(paste a ticket, see routing + urgency + summary; calls RoutingService in-process; deployable to HF Spaces)*
 - [x] Confusion-cost matrix & business-weighted eval *(cost-tuned decision rule cuts model cost ~62% vs argmax on the same probabilities; see Results §6)*
+- [x] Active learning loop *(opt-in prediction log; `scripts/active_loop.py surface --threshold 0.6` writes a JSONL human-review queue; `merge` appends corrections to `reviewed.parquet` for the next training run)*
 - [ ] Drift monitoring job
-- [ ] Active learning loop (driven by confidence threshold from baseline)
 - [ ] Deploy Streamlit demo to HF Spaces (build done; needs Space + secret + un-gitignoring `artifacts/`)

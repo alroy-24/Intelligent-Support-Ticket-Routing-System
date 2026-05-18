@@ -20,6 +20,7 @@ import os
 import time
 from pathlib import Path
 
+from ticketrouting.active.loop import LogRow, PredictionLog
 from ticketrouting.models.category.baseline import load as load_category_pipe
 from ticketrouting.models.category.baseline import predict_one as predict_category
 from ticketrouting.models.summary.summarizer import TicketSummarizer, TicketSummary
@@ -30,6 +31,7 @@ from ticketrouting.schemas import Category, RoutingDecision, TicketIn, Urgency
 DEFAULT_CATEGORY_PATH = Path("artifacts/baseline_category.joblib")
 DEFAULT_URGENCY_PATH = Path("artifacts/urgency_baseline.joblib")
 DEFAULT_SUMMARY_DEADLINE_S = 8.0
+ACTIVE_LOG_ENV_VAR = "ACTIVE_LOG_PATH"
 
 
 class RoutingService:
@@ -46,11 +48,13 @@ class RoutingService:
         urgency_pipe=None,
         summarizer: TicketSummarizer | None = None,
         summary_deadline_s: float = DEFAULT_SUMMARY_DEADLINE_S,
+        prediction_log: PredictionLog | None = None,
     ):
         self.category_pipe = category_pipe
         self.urgency_pipe = urgency_pipe
         self.summarizer = summarizer
         self.summary_deadline_s = summary_deadline_s
+        self.prediction_log = prediction_log
 
     @classmethod
     def from_env(
@@ -59,6 +63,7 @@ class RoutingService:
         urgency_path: Path | None = None,
         enable_summarizer: bool | None = None,
         summary_deadline_s: float = DEFAULT_SUMMARY_DEADLINE_S,
+        prediction_log_path: Path | None = None,
     ) -> "RoutingService":
         """Load whatever's available on disk + reachable. Never raises on missing pieces."""
         category_pipe = _try_load(category_path or DEFAULT_CATEGORY_PATH, load_category_pipe)
@@ -70,11 +75,18 @@ class RoutingService:
             )
         summarizer = TicketSummarizer() if enable_summarizer else None
 
+        # Active-learning log: opt-in via env var so tests don't accidentally write files.
+        if prediction_log_path is None:
+            env_path = os.environ.get(ACTIVE_LOG_ENV_VAR)
+            prediction_log_path = Path(env_path) if env_path else None
+        prediction_log = PredictionLog(prediction_log_path) if prediction_log_path else None
+
         return cls(
             category_pipe=category_pipe,
             urgency_pipe=urgency_pipe,
             summarizer=summarizer,
             summary_deadline_s=summary_deadline_s,
+            prediction_log=prediction_log,
         )
 
     @property
@@ -103,7 +115,7 @@ class RoutingService:
             summary_result = None
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
-        return RoutingDecision(
+        decision = RoutingDecision(
             route_to=[category[0]],
             route_confidence=category[1],
             urgency=urgency[0],
@@ -112,6 +124,24 @@ class RoutingService:
             entities=summary_result.entities if summary_result else None,
             latency_ms=elapsed_ms,
         )
+
+        # Active-learning log — never blocks or fails the response.
+        if self.prediction_log is not None:
+            try:
+                self.prediction_log.append(
+                    LogRow(
+                        text=ticket.text,
+                        predicted_category=decision.route_to[0].value,
+                        route_confidence=decision.route_confidence,
+                        predicted_urgency=decision.urgency.value,
+                        urgency_score=decision.urgency_score,
+                        ticket_id=ticket.ticket_id,
+                    )
+                )
+            except Exception:
+                pass
+
+        return decision
 
     # ------------------------------------------------------------------------
     # Per-model wrappers — each catches its own exceptions so a single failure

@@ -197,12 +197,30 @@ The Twitter pipeline (`scripts/build_twitter_dataset.py`) downloads the Customer
 
 17% of the sample lands in the three categories Bitext genuinely can't reach. The full ~20k run is the next thing to kick off — the pipeline is sha256-cached so partial runs resume for free.
 
+### Business-weighted cost analysis (the metric that actually matters)
+
+Macro-F1 treats every misclassification as equal. Routing isn't — sending a billing ticket to engineering wastes ~15 agent-minutes; predicting LOW for a CRITICAL outage costs hours. The eval script in [scripts/eval_costs.py](scripts/eval_costs.py) scores four strategies against [the default cost matrices](src/ticketrouting/eval/cost.py) (in agent-minutes per misroute):
+
+Run on the 100-row Twitter sample (which has all 6 categories, including the BUG/TECHNICAL/FEATURE_REQUEST examples Bitext can't reach):
+
+| Strategy | Cost / 1000 tickets | Accuracy | vs Random |
+|---|---:|---:|---:|
+| Random routing | 8,600 | 22% | — |
+| Majority class (always "other") | **1,700** | 66% | +80% |
+| Model (argmax) | 6,000 | 41% | +30% |
+| Model (cost-tuned) | 2,300 | 65% | +73% |
+
+Three honest readings:
+
+1. **The cost-tuned rule cuts cost by 62%** vs raw argmax (same model, same probabilities) by minimising expected cost with the matrix instead of picking the highest-probability class. When uncertain it routes to OTHER, because misrouting to the catch-all queue costs 5 minutes while misrouting to the wrong specialist costs 15. This is the "tuned against the matrix, not raw accuracy" line from §5 made concrete.
+2. **Majority class beats the model on this sample.** Twitter is 66% OTHER, so "always predict OTHER" cashes in on the skew. In production with a balanced inflow this flips — but the result honestly reflects what the baseline can do given its training data.
+3. **Argmax only beats random by 30%** because the baseline has never seen BUG/TECHNICAL/FEATURE_REQUEST and confidently miscategorises them. This is the same coverage gap §6 already documented — the cost matrix just turns the gap into a dollar number.
+
 ### Still to fill in
 
 - DistilBERT vs. baseline on Bitext (same split)
 - Both models on the Twitter dataset (real-world OOD comparison)
-- Ordinal urgency MAE and confusion matrix
-- Business-weighted cost reduction vs. random routing
+- Ordinal urgency MAE and confusion matrix (need a real urgency-labeled set)
 - P50 / P95 end-to-end latency
 - Per-1000-tickets API cost
 
@@ -267,7 +285,7 @@ ticketrouting/
 - [x] LLM summarizer + entity extractor *(JSON-mode call returning summary + pydantic Entities; sha256-cached; smoke-tested on real ticket)*
 - [x] FastAPI orchestration service *(`/route` runs all 3 models concurrently with a summary deadline + graceful degradation; `/health` reports per-model load status)*
 - [x] Streamlit demo *(paste a ticket, see routing + urgency + summary; calls RoutingService in-process; deployable to HF Spaces)*
-- [ ] Confusion-cost matrix & business-weighted eval
+- [x] Confusion-cost matrix & business-weighted eval *(cost-tuned decision rule cuts model cost ~62% vs argmax on the same probabilities; see Results §6)*
 - [ ] Drift monitoring job
 - [ ] Active learning loop (driven by confidence threshold from baseline)
 - [ ] Deploy Streamlit demo to HF Spaces (build done; needs Space + secret + un-gitignoring `artifacts/`)

@@ -266,7 +266,8 @@ ticketrouting/
 - [x] Ordinal urgency model *(TF-IDF + Frank & Hall K-1-threshold LogReg; MAE + off-by-≥2 reporting; awaiting real urgency-labeled training set)*
 - [x] LLM summarizer + entity extractor *(JSON-mode call returning summary + pydantic Entities; sha256-cached; smoke-tested on real ticket)*
 - [x] FastAPI orchestration service *(`/route` runs all 3 models concurrently with a summary deadline + graceful degradation; `/health` reports per-model load status)*
+- [x] Streamlit demo *(paste a ticket, see routing + urgency + summary; calls RoutingService in-process; deployable to HF Spaces)*
 - [ ] Confusion-cost matrix & business-weighted eval
 - [ ] Drift monitoring job
 - [ ] Active learning loop (driven by confidence threshold from baseline)
-- [ ] Streamlit demo on HF Spaces
+- [ ] Deploy Streamlit demo to HF Spaces (build done; needs Space + secret + un-gitignoring `artifacts/`)

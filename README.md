@@ -265,7 +265,7 @@ ticketrouting/
 - [ ] DistilBERT category classifier (compare against baseline on same split)
 - [x] Ordinal urgency model *(TF-IDF + Frank & Hall K-1-threshold LogReg; MAE + off-by-≥2 reporting; awaiting real urgency-labeled training set)*
 - [x] LLM summarizer + entity extractor *(JSON-mode call returning summary + pydantic Entities; sha256-cached; smoke-tested on real ticket)*
-- [ ] FastAPI orchestration service
+- [x] FastAPI orchestration service *(`/route` runs all 3 models concurrently with a summary deadline + graceful degradation; `/health` reports per-model load status)*
 - [ ] Confusion-cost matrix & business-weighted eval
 - [ ] Drift monitoring job
 - [ ] Active learning loop (driven by confidence threshold from baseline)

@@ -216,11 +216,32 @@ Three honest readings:
 2. **Majority class beats the model on this sample.** Twitter is 66% OTHER, so "always predict OTHER" cashes in on the skew. In production with a balanced inflow this flips — but the result honestly reflects what the baseline can do given its training data.
 3. **Argmax only beats random by 30%** because the baseline has never seen BUG/TECHNICAL/FEATURE_REQUEST and confidently miscategorises them. This is the same coverage gap §6 already documented — the cost matrix just turns the gap into a dollar number.
 
+### Urgency baseline (TF-IDF + Frank & Hall ordinal LogReg)
+
+Trained on 1,000 Bitext rows labeled via the LLM urgency labeler, 80/20 stratified split:
+
+| Metric | Value |
+|---|---:|
+| MAE (rank distance) | **0.42** |
+| Off-by-≥2 rate | 3.5% |
+| Macro F1 | 0.56 |
+| Weighted F1 | 0.62 |
+| Per-class F1 | low 0.71 · medium 0.61 · high 0.35 · critical 0.00 |
+
+Distribution of LLM-assigned urgency: `medium 597, low 316, high 87, critical 0`.
+
+**Two things this honestly shows:**
+
+1. **The ordinal framework works.** MAE under 0.5 and an off-by-≥2 rate of 3.5% are real signals: when the model is wrong, it's mostly wrong by one rank, not catastrophically. The Frank & Hall K-1 threshold decomposition behaves as expected on the 3 populated classes.
+2. **Bitext doesn't contain critical-grade text.** The labeler — following the rubric's "when in doubt, pick lower" rule — found zero outages, data breaches, or SLA-breach scenarios in Bitext's templated e-commerce intents. So the model has never seen a "critical" example and can't predict the class. Sanity check on real-sounding text: *"the whole site is down"* → predicted MEDIUM (0.38 conf); *"security alert: someone tried to log into my account"* → predicted LOW. The OrdinalLogReg's degenerate-threshold fallback (one binary classifier collapses to a constant) handles fitting cleanly; the data ceiling is what bites.
+
+Same pattern as the category baseline's BUG/TECHNICAL gap — fixing it requires labels from Twitter (or a real incident corpus), not better modelling.
+
 ### Still to fill in
 
 - DistilBERT vs. baseline on Bitext (same split)
-- Both models on the Twitter dataset (real-world OOD comparison)
-- Ordinal urgency MAE and confusion matrix (need a real urgency-labeled set)
+- Both models on the full Twitter dataset (real-world OOD comparison)
+- Urgency model trained on a corpus that includes incident-grade text (Twitter + synthetic critical examples)
 - P50 / P95 end-to-end latency
 - Per-1000-tickets API cost
 
@@ -281,7 +302,7 @@ ticketrouting/
 - [x] Twitter dataset ingestion + LLM-based category labeling *(pipeline + 100-row smoke test; ~20k full run pending)*
 - [ ] Full 20k Twitter labeling run + merge with Bitext for combined training set
 - [ ] DistilBERT category classifier (compare against baseline on same split)
-- [x] Ordinal urgency model *(TF-IDF + Frank & Hall K-1-threshold LogReg; MAE + off-by-≥2 reporting; awaiting real urgency-labeled training set)*
+- [x] Ordinal urgency model *(TF-IDF + Frank & Hall K-1-threshold LogReg; trained on 1k LLM-labeled Bitext rows; MAE 0.42, off-by-≥2 rate 3.5%; data ceiling on critical-grade text — see Results §6)*
 - [x] LLM summarizer + entity extractor *(JSON-mode call returning summary + pydantic Entities; sha256-cached; smoke-tested on real ticket)*
 - [x] FastAPI orchestration service *(`/route` runs all 3 models concurrently with a summary deadline + graceful degradation; `/health` reports per-model load status)*
 - [x] Streamlit demo *(paste a ticket, see routing + urgency + summary; calls RoutingService in-process; deployable to HF Spaces)*
